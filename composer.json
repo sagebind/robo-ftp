@@ -1,0 +1,24 @@
+{
+    "name": "coderstephen/robo-ftp",
+    "type": "library",
+    "keywords": ["robo","ftp","ftps"],
+    "license": "MIT",
+    "description": "FTP(S) task for Robo",
+    "authors": [
+        {
+            "name": "Stephen Coakley",
+            "email": "me@stephencoakley.com",
+            "homepage": "http://stephencoakley.com"
+        }
+    ],
+    "require": {
+        "php": ">=5.4.0",
+        "dg/ftp-php": "~1.1",
+        "symfony/finder": "~2.6"
+    },
+    "autoload": {
+        "psr-4": {
+            "RoboFtp\\": "src"
+        }
+    }
+}

@@ -1,6 +1,7 @@
 <?php
 namespace RoboFtp;
 
+use Robo\Result;
 use Robo\Task\BaseTask;
 use Symfony\Component\Finder\Finder;
 
@@ -9,15 +10,58 @@ use Symfony\Component\Finder\Finder;
  */
 class FtpDeployTask extends BaseTask
 {
+    /**
+     * @var string The FTP host to connect to.
+     */
     protected $host;
-    protected $user;
-    protected $password;
-    protected $directory = '/';
-    protected $useSSL = true;
-    protected $dryRun = false;
-    protected $finder;
-    protected $sizeDifferent = false;
 
+    /**
+     * @var string The user to log in to the server as.
+     */
+    protected $user;
+
+    /**
+     * @var string The password to log in with.
+     */
+    protected $password;
+
+    /**
+     * @var string The port to connect over.
+     */
+    protected $port = 21;
+
+    /**
+     * @var string The directory to deploy to on the remote server.
+     */
+    protected $targetDirectory = '/';
+
+    /**
+     * @var string Indicates if the connection should be established over SSL.
+     */
+    protected $useSSL = true;
+
+    /**
+     * @var string Indicates if files should be skipped based on size.
+     */
+    protected $skipSizeEqual = false;
+
+    /**
+     * @var string Indicates if files should be skipped based on modified date.
+     */
+    protected $skipUnmodified = false;
+
+    /**
+     * @var string The finder instance for iterating over input files.
+     */
+    protected $finder;
+
+    /**
+     * Creates a new FTP deploy task instance.
+     *
+     * @param string $host     The FTP host to connect to.
+     * @param string $user     The user to log in to the server as.
+     * @param string $password The password to log in with.
+     */
     public function __construct($host, $user, $password)
     {
         $this->host = $host;
@@ -27,15 +71,28 @@ class FtpDeployTask extends BaseTask
     }
 
     /**
+     * Sets the port to connect over.
+     *
+     * @param  int $port The port number.
+     *
+     * @return FtpDeployTask The current task.
+     */
+    public function port($port)
+    {
+        $this->port = (int)$port;
+        return $this;
+    }
+
+    /**
      * Sets the target path on the remote server to deploy to.
      *
      * @param string $directory
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
     public function dir($directory)
     {
-        $this->directory = $directory;
+        $this->targetDirectory = '/' . trim(preg_replace('%[\\\\/]+%', '/', $directory), '/');
         return $this;
     }
 
@@ -44,9 +101,9 @@ class FtpDeployTask extends BaseTask
      *
      * @param string $directory
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
-    public function in($directory)
+    public function from($directory)
     {
         $this->finder->in($directory);
         return $this;
@@ -57,9 +114,9 @@ class FtpDeployTask extends BaseTask
      *
      * @param string $pattern
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
-    public function path($pattern)
+    public function matching($pattern)
     {
         $this->finder->path($pattern);
         return $this;
@@ -70,7 +127,7 @@ class FtpDeployTask extends BaseTask
      *
      * @param string $pattern
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
     public function exclude($pattern)
     {
@@ -81,7 +138,7 @@ class FtpDeployTask extends BaseTask
     /**
      * Enables FTPS file transfer.
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
     public function secure($secure = true)
     {
@@ -90,20 +147,31 @@ class FtpDeployTask extends BaseTask
     }
 
     /**
-     * Enables FTPS file transfer.
+     * Skips uploading files whose size is equal to the existing remote file.
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
-    public function sizeDifferent()
+    public function skipSizeEqual()
     {
-        $this->sizeDifferent = true;
+        $this->skipSizeEqual = true;
+        return $this;
+    }
+
+    /**
+     * Skips uploading files whose modification date is equal or older than the existing remote file.
+     *
+     * @return FtpDeployTask The current task.
+     */
+    public function skipUnmodified()
+    {
+        $this->skipUnmodified = true;
         return $this;
     }
 
     /**
      * Enables or disables ignoring of common VCS-related files.
      *
-     * @return FtpDeployTask
+     * @return FtpDeployTask The current task.
      */
     public function ignoreVCS($ignore = true)
     {
@@ -112,74 +180,100 @@ class FtpDeployTask extends BaseTask
     }
 
     /**
-     * Sets the task as a dry run.
-     *
-     * @return FtpDeployTask
-     */
-    public function dryRun()
-    {
-        $this->dryRun = true;
-        return $this;
-    }
-
-    /**
      * Runs the FTP deploy task.
+     *
+     * @return Result The result of the task.
      */
     public function run()
     {
         $ftp = new \Ftp();
 
         // connect to the server
-        if ($this->useSSL) {
-            $ftp->sslConnect($this->host);
-        } else {
-            $ftp->connect($this->host);
+        try {
+            if ($this->useSSL) {
+                $ftp->sslConnect($this->host);
+            } else {
+                $ftp->connect($this->host);
+            }
+            $ftp->login($this->user, $this->password);
+
+            // create the target directory if it does not exist
+            $ftp->chdir('/');
+            if (!$ftp->isDir($this->targetDirectory)) {
+                $this->printTaskInfo('Creating directory: ' . $this->targetDirectory);
+                $ftp->mkDirRecursive($this->targetDirectory);
+            }
+
+            // scan and index files in finder -- directories first
+            $this->printTaskInfo('Scanning files to upload...');
+            $this->finder->sortByType();
+
+            // display summary before deploying
+            $this->printTaskInfo(sprintf('Deploying %d files to "%s://%s@%s%s"...',
+                $this->finder->count(),
+                $this->useSSL ? 'ftps' : 'ftp',
+                $this->user,
+                $this->host,
+                $this->targetDirectory));
+
+            // upload each file, starting with directories
+            foreach ($this->finder as $file) {
+                $this->upload($ftp, $file);
+            }
+
+            // close the connection
+            $ftp->close();
+        } catch (\FtpException $e) {
+            return Result::error($this, 'Error: ' . $e->getMessage());
         }
 
-        // log in to the server
-        $ftp->login($this->user, $this->password);
+        // success!
+        return Result::success($this, 'All files deployed.');
+    }
 
-        // sort files to upload by type; directories first
-        $this->finder->sortByType();
+    /**
+     * Uploads a file or directory to an FTP connection.
+     */
+    protected function upload(\Ftp $ftp, \SplFileInfo $file)
+    {
+        // enter into passive mode
+        $ftp->pasv(true);
 
-        // upload each file, starting with directories
-        foreach ($this->finder as $file) {
-            // enter into passive mode
-            $ftp->pasv(true);
+        // move to the file's parent directory
+        $ftp->chdir($this->targetDirectory . '/' . $file->getRelativePath());
 
-            // move to the file's parent directory
-            $ftp->chdir($this->directory . '/' . $file->getRelativePath());
+        // check if the file exists
+        $fileExists = in_array($file->getBasename(), $ftp->nlist('.'));
 
-            // check if the file exists
-            $fileExists = in_array($file->getBasename(), $ftp->nlist('.'));
+        // check if the file is a directory
+        if ($file->isDir()) {
+            // create the directory if it does not exist
+            if (!$fileExists) {
+                $this->printTaskInfo('Creating directory: ' . $file->getRelativePathname());
 
-            // check if the file is a directory
-            if ($file->isDir()) {
-                // create the directory if it does not exist
-                if (!$fileExists) {
-                    $this->printTaskInfo(sprintf('Create directory: "%s"', $this->directory . '/' . $file->getRelativePathname()));
-
-                    // create directory if not dry run
-                    if ($this->dryRun) {
-                        $ftp->mkdir($file->getBasename());
-                    }
+                // create directory
+                $ftp->mkdir($file->getBasename());
+            }
+        } else {
+            // if the file already exists, check our skip options
+            if ($fileExists) {
+                // skip the file if the file sizes are equal
+                if ($this->skipSizeEqual && $ftp->size($file->getBasename()) === $file->getSize()) {
+                    return;
                 }
-            } else {
-                // check if the destination file already exists
-                if ($fileExists) {
-                    $this->printTaskInfo(sprintf('The remote file "%s" already exists. Skipping.', $this->directory . '/' . $file->getRelativePathname()));
-                    continue;
-                }
 
-                // upload file if not dry run
-                $this->printTaskInfo(sprintf('Uploading: "%s" <- "%s"', $this->directory, $file->getRelativePathname()));
-                if (!$this->dryRun) {
-                    $ftp->put($file->getBasename(), $file->getRealpath(), FTP_BINARY);
+                // skip the file if modified time is same or newer than source
+                if ($this->skipUnmodified && $ftp->mdtm($file->getBasename()) >= $file->getMTime()) {
+                    return;
                 }
             }
-        }
 
-        // close the connection
-        $ftp->close();
+            // try to upload the file
+            $this->printTaskInfo('Uploading: ' . $file->getRelativePathname());
+            if (!$ftp->put($file->getBasename(), $file->getRealpath(), FTP_BINARY)) {
+                // something went wrong
+                return Result::error($this, 'Failed while uploading file ' . $file->getRelativePathname());
+            }
+        }
     }
 }

@@ -124,7 +124,7 @@ class FtpDeployTask extends BaseTask
      */
     public function files($files)
     {
-        $files = is_array($files) ?: [(string)$files];
+        $files = is_array($files) ? $files : [(string)$files];
         $this->files = array_merge($this->files, $files);
         return $this;
     }

@@ -56,6 +56,11 @@ class FtpDeployTask extends BaseTask
     protected $finder;
 
     /**
+     * @var array A list of concrete files to upload.
+     */
+    protected $files;
+
+    /**
      * Creates a new FTP deploy task instance.
      *
      * @param string $host     The FTP host to connect to.
@@ -68,6 +73,7 @@ class FtpDeployTask extends BaseTask
         $this->user = $user;
         $this->password = $password;
         $this->finder = new Finder();
+        $this->files = [];
     }
 
     /**
@@ -107,6 +113,19 @@ class FtpDeployTask extends BaseTask
     {
         $this->finder->in($directory);
         return $this;
+    }
+
+    /**
+     * Adds specific files to be uploaded.
+     *
+     * @param  array|string $files A file or list of files to upload.
+     *
+     * @return FtpDeployTask The current task.
+     */
+    public function files($files)
+    {
+        $files = is_array($files) ?: [(string)$files];
+        $this->files = array_merge($this->files, $files);
     }
 
     /**
@@ -204,8 +223,9 @@ class FtpDeployTask extends BaseTask
                 $ftp->mkDirRecursive($this->targetDirectory);
             }
 
-            // scan and index files in finder -- directories first
+            // scan and index files in finder
             $this->printTaskInfo('Scanning files to upload...');
+            // directories first
             $this->finder->sortByType();
 
             // display summary before deploying
@@ -219,6 +239,11 @@ class FtpDeployTask extends BaseTask
             // upload each file, starting with directories
             foreach ($this->finder as $file) {
                 $this->upload($ftp, $file);
+            }
+
+            // upload discrete files
+            foreach ($this->files as $file) {
+                $this->upload($ftp, new \SplFileInfo($file));
             }
 
             // close the connection

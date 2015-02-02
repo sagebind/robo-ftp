@@ -56,6 +56,11 @@ class FtpDeployTask extends BaseTask
     protected $finder;
 
     /**
+     * @var bool Indicates if the finder has something to find.
+     */
+    protected $finderReady = false;
+
+    /**
      * @var array A list of concrete files to upload.
      */
     protected $files;
@@ -112,6 +117,7 @@ class FtpDeployTask extends BaseTask
     public function from($directory)
     {
         $this->finder->in($directory);
+        $this->finderReady = true;
         return $this;
     }
 
@@ -238,8 +244,10 @@ class FtpDeployTask extends BaseTask
                 $this->targetDirectory));
 
             // upload each file, starting with directories
-            foreach ($this->finder as $file) {
-                $this->upload($ftp, $file);
+            if ($this->finderReady) {
+                foreach ($this->finder as $file) {
+                    $this->upload($ftp, $file);
+                }
             }
 
             // upload discrete files

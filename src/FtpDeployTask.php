@@ -240,10 +240,8 @@ class FtpDeployTask extends BaseTask
                 $this->targetDirectory));
 
             // upload each file, starting with directories
-            if ($this->finderReady) {
-                foreach ($this->finder as $file) {
-                    $this->upload($ftp, $file);
-                }
+            foreach ($this->finder as $file) {
+                $this->upload($ftp, $file);
             }
 
             // close the connection

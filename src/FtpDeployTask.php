@@ -196,7 +196,7 @@ class FtpDeployTask extends BaseTask
     public function ignoreVCS($ignore = true)
     {
         $finder->ignoreVCS($ignore);
-        return $true;
+        return $this;
     }
 
     /**

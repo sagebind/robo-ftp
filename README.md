@@ -33,7 +33,7 @@ class RoboFile extends \Robo\Tasks
 ```
 
 ## SSL Support
-This task supports using FTP over SSl by default. You need the [SSL extension](http://php.net/ssl) for this to work, which isn't always available on Windows. If you want to disable SSL for your task, you can use the `secure()` method:
+This task supports using FTP over SSL by default. You need the [SSL extension](http://php.net/ssl) for this to work, which isn't always available on Windows. If you want to disable SSL for your task, you can use the `secure()` method:
 
 ```php
 class RoboFile extends \Robo\Tasks

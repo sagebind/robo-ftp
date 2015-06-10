@@ -1,4 +1,8 @@
 # Robo FTP Deploy Task
+[![Version](https://img.shields.io/packagist/v/coderstephen/robo-ftp.svg)](https://packagist.org/packages/coderstephen/robo-ftp)
+[![License](https://img.shields.io/packagist/l/coderstephen/robo-ftp.svg)](https://packagist.org/packages/coderstephen/robo-ftp)
+[![Downloads](https://img.shields.io/packagist/dt/coderstephen/robo-ftp.svg)](https://packagist.org/packages/coderstephen/robo-ftp)
+
 A simple task for the [Robo](http://robo.li) task runner for deploying files to a remote server using FTP. Useful for shared hosting servers if you do not have SSH access, or for if you need better platform independence.
 
 ## Installation

@@ -41,6 +41,11 @@ class FtpDeployTask extends BaseTask
     protected $useSSL = true;
 
     /**
+     * @var string Indicates if the git diff should be deployed.
+     */
+    protected $gitDiff = false;
+
+    /**
      * @var string Indicates if files should be skipped based on size.
      */
     protected $skipSizeEqual = false;
@@ -79,7 +84,7 @@ class FtpDeployTask extends BaseTask
     /**
      * Sets the port to connect over.
      *
-     * @param  int $port The port number.
+     * @param int $port The port number.
      *
      * @return FtpDeployTask The current task.
      */
@@ -98,7 +103,7 @@ class FtpDeployTask extends BaseTask
      */
     public function dir($directory)
     {
-        $this->targetDirectory = '/' . trim(preg_replace('%[\\\\/]+%', '/', $directory), '/');
+        $this->targetDirectory = '/'.trim(preg_replace('%[\\\\/]+%', '/', $directory), '/');
         return $this;
     }
 
@@ -118,7 +123,7 @@ class FtpDeployTask extends BaseTask
     /**
      * Adds specific files to be uploaded.
      *
-     * @param  array|string $files A file or list of files to upload.
+     * @param array|string $files A file or list of files to upload.
      *
      * @return FtpDeployTask The current task.
      */
@@ -189,6 +194,17 @@ class FtpDeployTask extends BaseTask
     }
 
     /**
+     * Deploys files changed between the current commit and the commit deployed to the remote server.
+     *
+     * @return FtpDeployTask The current task.
+     */
+    public function gitDiff()
+    {
+        $this->gitDiff = true;
+        return $this;
+    }
+
+    /**
      * Enables or disables ignoring of common VCS-related files.
      *
      * @return FtpDeployTask The current task.
@@ -219,9 +235,14 @@ class FtpDeployTask extends BaseTask
 
             // create the target directory if it does not exist
             $ftp->chdir('/');
-            if (!$ftp->isDir($this->targetDirectory)) {
-                $this->printTaskInfo('Creating directory: ' . $this->targetDirectory);
+            if (!$ftp->fileExists($this->targetDirectory)) {
+                $this->printTaskInfo('Creating directory: '.$this->targetDirectory);
                 $ftp->mkDirRecursive($this->targetDirectory);
+            }
+
+            // get files from git if enabled
+            if ($this->gitDiff) {
+                $this->files($this->getGitDiff($ftp));
             }
 
             // scan and index files in finder
@@ -247,7 +268,7 @@ class FtpDeployTask extends BaseTask
             // close the connection
             $ftp->close();
         } catch (\FtpException $e) {
-            return Result::error($this, 'Error: ' . $e->getMessage());
+            return Result::error($this, 'Error: '.$e->getMessage());
         }
 
         // success!
@@ -256,6 +277,9 @@ class FtpDeployTask extends BaseTask
 
     /**
      * Uploads a file or directory to an FTP connection.
+     *
+     * @param \Ftp         $ftp  An active FTP connection.
+     * @param \SplFileInfo $file A local file to upload.
      */
     protected function upload(\Ftp $ftp, \SplFileInfo $file)
     {
@@ -263,7 +287,7 @@ class FtpDeployTask extends BaseTask
         $ftp->pasv(true);
 
         // move to the file's parent directory
-        $ftp->chdir($this->targetDirectory . '/' . $file->getRelativePath());
+        $ftp->chdir($this->targetDirectory.'/'.$file->getRelativePath());
 
         // check if the file exists
         $fileExists = in_array($file->getBasename(), $ftp->nlist('.'));
@@ -272,7 +296,7 @@ class FtpDeployTask extends BaseTask
         if ($file->isDir()) {
             // create the directory if it does not exist
             if (!$fileExists) {
-                $this->printTaskInfo('Creating directory: ' . $file->getRelativePathname());
+                $this->printTaskInfo('Creating directory: '.$file->getRelativePathname());
 
                 // create directory
                 $ftp->mkdir($file->getBasename());
@@ -292,11 +316,78 @@ class FtpDeployTask extends BaseTask
             }
 
             // try to upload the file
-            $this->printTaskInfo('Uploading: ' . $file->getRelativePathname());
+            $this->printTaskInfo('Uploading: '.$file->getRelativePathname());
             if (!$ftp->put($file->getBasename(), $file->getRealpath(), FTP_BINARY)) {
                 // something went wrong
-                return Result::error($this, 'Failed while uploading file ' . $file->getRelativePathname());
+                return Result::error($this, 'Failed while uploading file '.$file->getRelativePathname());
             }
         }
+    }
+
+    /**
+     * Gets a list of files to be uploaded based on the difference between HEAD
+     * and the commit last deployed.
+     *
+     * @param \Ftp $ftp An active FTP connection.
+     *
+     * @return string[] An array of file names to upload.
+     */
+    protected function getGitDiff(\Ftp $ftp)
+    {
+        $this->printTaskInfo('Checking remote site for Git info...');
+
+        $ftp->chdir($this->targetDirectory);
+
+        if (in_array('.git-commit', $ftp->nlist('.'))) {
+            $tempHandle = fopen('php://temp', 'r+');
+
+            if ($ftp->fget($tempHandle, '.git-commit', FTP_ASCII, 0)) {
+                rewind($tempHandle);
+                $commitId = stream_get_contents($tempHandle);
+
+                $this->printTaskInfo('Remote site has version '.$commitId.'.');
+                $this->printTaskInfo(' Scanning for changes...');
+
+                $result = $this->taskExec('git')
+                    ->arg('diff')
+                    ->arg('--name-only')
+                    ->arg('--diff-filter=ACMRT')
+                    ->arg($commitId)
+                    ->arg('HEAD')
+                    ->run();
+
+                return preg_split('/[\r\n]+/', trim($result->getMessage()));
+            }
+        }
+
+        $this->printTaskInfo('No Git info found on remote site.');
+        $this->printTaskInfo('Adding all files in repo...');
+
+        // No commit saved on remote site; deploy everything in repo
+        $result = $this->taskExec('git')
+            ->arg('ls-files')
+            ->run();
+
+        return preg_split('/[\r\n]+/', trim($result->getMessage()));
+    }
+
+    /**
+     * Writes the current Git commit ID to the remote site.
+     *
+     * @param \Ftp $ftp An active FTP connection.
+     */
+    protected function writeGitCommit(\Ftp $ftp)
+    {
+        $ftp->chdir($this->targetDirectory);
+
+        // get the current commit hash
+        $result = (new ExecTask('git'))
+            ->arg('rev-parse')
+            ->arg('HEAD')
+            ->run();
+
+        // write the commit hash to the meta file
+        $stream = fopen('data://text/plain,'.trim($result->getMessage()), 'r');
+        $ftp->fput('.git-commit', $stream, FTP_ASCII);
     }
 }
